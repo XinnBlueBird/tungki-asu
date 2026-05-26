@@ -26,6 +26,11 @@ db/*.sqlite-shm
 .vscode/
 *.swp
 
+# Operator's private concept pool — sample-only ships in the repo.
+# Build your own concepts.py from concepts_sample.py.
+concepts.py
+!concepts_sample.py
+
 # Generated screenshots / scratch
 ss/
 *.png

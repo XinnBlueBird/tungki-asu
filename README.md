@@ -30,7 +30,7 @@ Telegram bot  ──▶  SQLite queue  ──▶  Worker  ──▶  GitHub + Ve
 - **`builder.py`** — Scaffolds `create-next-app`, writes `.env.example`, license, gitignore, etc.
 - **`templates_ui.py`** — 6 layout variants (`terminal`, `magazine`, `soc`, `brutalist`, `dashboard`, `editorial`). Each project gets a different layout to avoid template-clone detection.
 - **`templates_text.py`** — README template, MiMo description renderer (auto-trims to 1200 char limit).
-- **`concepts.py`** — The 115-project pool. Each concept ships a slug, name, tagline, layout variant, problem statement, system prompt for MiMo, and output sections.
+- **`concepts_sample.py`** — 5 example concepts as a starting template. Copy to `concepts.py` and grow your own pool. The full curated 115-concept pool is the operator's edge and is **not distributed**.
 - **`jobqueue.py`** — SQLite ops, claim/done/failed transitions, used-concept tracking.
 
 ---
@@ -175,7 +175,11 @@ tungki-asu/
 
 ## Concept pool
 
-115 projects, each unique. Categories include JWT inspectors, regex tools, YAML linters, container scanners, IAM auditors, JSON-to-types generators, k8s manifest generators, log clusterers, schema diffs, SBOM auditors, OIDC auditors, GraphQL cost analyzers, HAProxy/Kafka/Prometheus auditors, and many more. See `concepts.py`.
+`concepts_sample.py` ships with **5 example concepts** to show you the shape (JWT inspector, regex tutor, YAML linter, DNS tracer, secret scanner). Each concept defines its slug, layout variant, problem statement, MiMo system prompt, sample input, and output sections.
+
+To run the bot you need to **build your own pool** in a `concepts.py` file (gitignored — won't be committed). Pick categories that match your domain. The pipeline picks one unused concept per submission, rotates layout variants to avoid template-clone detection, and burns the `concept_kind` so it never gets reused.
+
+The author's full curated 115-concept pool is **not distributed** — that's the operator's edge.
 
 ---
 
