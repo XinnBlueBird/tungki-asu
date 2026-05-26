@@ -381,7 +381,7 @@ def main_loop():
         print(f"[worker] boot recovery error: {e}")
 
     submit_count = 0
-    ROTATE_EVERY = 3  # rotate WARP exit IP every N successful/attempted submits to dodge HTTP 429
+    ROTATE_EVERY = 2  # rotate WARP exit IP every N submits — aggressive to keep CF trust score fresh
     last_recover_ts = 0
     RECOVER_INTERVAL = 120  # check for stale/failed jobs every N seconds
 
@@ -418,11 +418,12 @@ def main_loop():
             traceback.print_exc()
             mark_failed(job["id"], "unhandled exception")
             submit_count += 1  # still count — IP got hit even on exception
-        # Cooldown between jobs to keep CF trust score healthy. Random jitter so
-        # we don't look like a periodic bot. 60-180s = enough for CF heuristics
-        # to age out without dragging total batch time too much.
+        # Cooldown between jobs. Short jitter — paired with aggressive WARP
+        # rotate (every 2 submits) which gives each job a fresh IP, so CF
+        # heuristics don't accumulate. 20-45s = enough to look human, fast
+        # enough to drain 80 jobs in reasonable time.
         import random
-        cooldown = random.randint(60, 180)
+        cooldown = random.randint(20, 45)
         print(f"[worker] cooldown {cooldown}s before next job")
         time.sleep(cooldown)
 
