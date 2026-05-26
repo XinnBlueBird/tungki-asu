@@ -20,7 +20,7 @@ sys.path.insert(0, str(ROOT))
 from jobqueue import (
     init_db, claim_next, mark_done, mark_failed, update_job,
     record_concept, get_burned_concepts, get_burned_slugs, is_batch_complete,
-    get_batch_jobs,
+    get_batch_jobs, recover_stale_jobs, requeue_failed,
 )
 from concepts import pick_unused, find_concept
 from builder import scaffold, write_env_files, write_api_routes, run as bld_run
@@ -293,6 +293,10 @@ def process_job(job: dict):
         captcha = "rejected" if "REJECTED" in err_msg or "result: False" in err_msg else "timeout" if "timeout" in err_msg.lower() else "failed"
         mark_failed(job_id, f"submit: {err_msg[:300]}", captcha_status=captcha, submit_status="failed")
         tg_send_text(owner, f"Job {job_id} ({concept['slug']}) submit failed: <code>{err_msg[:200]}</code>")
+        # 429 / rate-limit detected → rotate WARP NOW so the next job gets a fresh IP
+        if "429" in err_msg or "rate" in err_msg.lower():
+            new_ip = rotate_warp_ip()
+            tg_send_text(owner, f"🔄 429 detected — WARP force-rotated, new IP: <code>{new_ip or 'unknown'}</code>")
         return
 
     # 6. report success
@@ -336,20 +340,84 @@ def send_batch_recap(owner: int, batch_id: str):
     tg_send_text(owner, f"<pre>{chr(10).join(lines)}</pre>")
 
 
+def rotate_warp_ip() -> str:
+    """Force WARP to a fresh exit IP by rotating tunnel keys.
+
+    Plain disconnect/connect doesn't rotate — Cloudflare reuses the same IP.
+    `tunnel rotate-keys` regenerates the key-pair which forces a new exit.
+    Returns the new public IP (or empty string if probe fails).
+    """
+    try:
+        subprocess.run(["warp-cli", "--accept-tos", "disconnect"], capture_output=True, timeout=20)
+        subprocess.run(["warp-cli", "--accept-tos", "tunnel", "rotate-keys"], capture_output=True, timeout=20)
+        time.sleep(2)
+        subprocess.run(["warp-cli", "--accept-tos", "connect"], capture_output=True, timeout=20)
+        time.sleep(8)
+        p = subprocess.run(
+            ["curl", "-s", "--socks5", "127.0.0.1:40000", "-m", "10", "https://api.ipify.org"],
+            capture_output=True, text=True, timeout=20,
+        )
+        return (p.stdout or "").strip()
+    except Exception as e:
+        print(f"[warp-rotate] failed: {e}")
+        return ""
+
+
 def main_loop():
     init_db()
     load_creds()
     print(f"[worker] started, owner={BOT_OWNER_ID}")
+
+    # Boot-time recovery: if worker crashed/restarted, any job left in
+    # 'building' or 'submitting' is a zombie. Reclaim them.
+    try:
+        boot_recovered = recover_stale_jobs()
+        boot_requeued = requeue_failed()
+        if boot_recovered or boot_requeued:
+            msg = f"🔧 boot recovery: {boot_recovered} stale + {boot_requeued} failed → requeued"
+            print(f"[worker] {msg}")
+            tg_send_text(BOT_OWNER_ID, msg)
+    except Exception as e:
+        print(f"[worker] boot recovery error: {e}")
+
+    submit_count = 0
+    ROTATE_EVERY = 5  # rotate WARP exit IP every N successful/attempted submits to dodge HTTP 429
+    last_recover_ts = 0
+    RECOVER_INTERVAL = 120  # check for stale/failed jobs every N seconds
+
     while True:
+        # Periodic auto-recovery: catches anything that slipped through (zombie
+        # builds, 429-failures, captcha timeouts). No-op when nothing stale.
+        now = int(time.time())
+        if now - last_recover_ts > RECOVER_INTERVAL:
+            try:
+                rec = recover_stale_jobs()
+                req = requeue_failed()
+                if rec or req:
+                    print(f"[worker] auto-recovery: {rec} stale + {req} failed → pending")
+            except Exception as e:
+                print(f"[worker] recovery error: {e}")
+            last_recover_ts = now
+
         job = claim_next()
         if not job:
             time.sleep(10)
             continue
+
+        # Rotate WARP IP every N submits to avoid Cloudflare/MiMo rate-limits.
+        # Done BEFORE process_job so the new IP is in place when the submit POST fires.
+        if submit_count > 0 and submit_count % ROTATE_EVERY == 0:
+            new_ip = rotate_warp_ip()
+            print(f"[worker] WARP rotated after {submit_count} jobs, new exit IP: {new_ip or 'unknown'}")
+            tg_send_text(BOT_OWNER_ID, f"🔄 WARP rotated after {submit_count} submits, new IP: <code>{new_ip or 'unknown'}</code>")
+
         try:
             process_job(job)
+            submit_count += 1
         except Exception:
             traceback.print_exc()
             mark_failed(job["id"], "unhandled exception")
+            submit_count += 1  # still count — IP got hit even on exception
         # small cooldown between jobs to keep IP score healthy
         time.sleep(5)
 

@@ -41,6 +41,15 @@ CREATE INDEX IF NOT EXISTS idx_status ON jobs(status);
 CREATE INDEX IF NOT EXISTS idx_batch ON jobs(batch_id);
 """
 
+# How long a job can stay in 'building'/'submitting' before it's considered a zombie
+# (worker crashed or restarted mid-build). Build is the slowest step (npm install +
+# next build), typically 60-120s. 15 min is generous safety margin.
+STALE_AFTER_SEC = 15 * 60
+
+# How many times to retry a job before giving up. Each retry resets to 'pending'
+# and gets re-claimed. Captures: 429 rate-limits, captcha timeouts, network blips.
+MAX_RETRIES = 5
+
 
 @contextmanager
 def conn():
@@ -56,6 +65,69 @@ def conn():
 def init_db():
     with conn() as c:
         c.executescript(SCHEMA)
+        # Idempotent migration: add retry_count column if missing
+        cols = [r["name"] for r in c.execute("PRAGMA table_info(jobs)").fetchall()]
+        if "retry_count" not in cols:
+            c.execute("ALTER TABLE jobs ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0")
+
+
+def recover_stale_jobs() -> int:
+    """Requeue jobs stuck in 'building'/'submitting' beyond STALE_AFTER_SEC.
+
+    Called once at worker boot (catches zombies from crashed/restarted workers)
+    and periodically inside the main loop. Increments retry_count; jobs that
+    exceed MAX_RETRIES are marked 'failed' permanently so they don't loop forever.
+
+    Returns number of jobs recovered.
+    """
+    init_db()
+    cutoff = int(time.time()) - STALE_AFTER_SEC
+    recovered = 0
+    with conn() as c:
+        rows = c.execute(
+            "SELECT id, retry_count, project_name FROM jobs "
+            "WHERE status IN ('building', 'submitting') AND started_at < ?",
+            (cutoff,),
+        ).fetchall()
+        for row in rows:
+            new_retries = (row["retry_count"] or 0) + 1
+            if new_retries > MAX_RETRIES:
+                c.execute(
+                    "UPDATE jobs SET status='failed', error=?, finished_at=?, retry_count=? WHERE id=?",
+                    (f"max retries exceeded ({MAX_RETRIES}) — last stuck in build/submit", int(time.time()), new_retries, row["id"]),
+                )
+            else:
+                c.execute(
+                    "UPDATE jobs SET status='pending', started_at=NULL, retry_count=? WHERE id=?",
+                    (new_retries, row["id"]),
+                )
+                recovered += 1
+    return recovered
+
+
+def requeue_failed() -> int:
+    """Requeue all 'failed' jobs back to 'pending', respecting MAX_RETRIES.
+
+    Worker calls this periodically so 429-failures (or anything mark_failed'd
+    mid-run) get auto-retried instead of needing manual intervention.
+
+    Returns number of jobs requeued.
+    """
+    init_db()
+    requeued = 0
+    with conn() as c:
+        rows = c.execute(
+            "SELECT id, retry_count FROM jobs WHERE status='failed' AND COALESCE(retry_count,0) < ?",
+            (MAX_RETRIES,),
+        ).fetchall()
+        for row in rows:
+            new_retries = (row["retry_count"] or 0) + 1
+            c.execute(
+                "UPDATE jobs SET status='pending', error=NULL, started_at=NULL, finished_at=NULL, retry_count=? WHERE id=?",
+                (new_retries, row["id"]),
+            )
+            requeued += 1
+    return requeued
 
 
 def enqueue_batch(gmails: list[str], owner_chat_id: int) -> tuple[str, list[int]]:

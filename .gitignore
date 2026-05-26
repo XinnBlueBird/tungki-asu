@@ -18,6 +18,10 @@ env/
 db/queue.sqlite
 db/*.sqlite-journal
 db/*.sqlite-wal
+*.db
+
+# Backups
+*.bak
 db/*.sqlite-shm
 
 # OS / IDE
