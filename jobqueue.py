@@ -43,8 +43,9 @@ CREATE INDEX IF NOT EXISTS idx_batch ON jobs(batch_id);
 
 # How long a job can stay in 'building'/'submitting' before it's considered a zombie
 # (worker crashed or restarted mid-build). Build is the slowest step (npm install +
-# next build), typically 60-120s. 15 min is generous safety margin.
-STALE_AFTER_SEC = 15 * 60
+# next build), typically 60-120s. Submit phase typically 60-180s. 8 min covers both
+# without leaving zombies idle for 15 min after a worker restart.
+STALE_AFTER_SEC = 8 * 60
 
 # How many times to retry a job before giving up. Each retry resets to 'pending'
 # and gets re-claimed. Captures: 429 rate-limits, captcha timeouts, network blips.
