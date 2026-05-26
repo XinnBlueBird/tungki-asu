@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv
+
+# Local secrets
+.env
+.env.local
+*.env
+!.env.example
+
+# Database
+db/queue.sqlite
+db/*.sqlite-journal
+db/*.sqlite-wal
+db/*.sqlite-shm
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Generated screenshots / scratch
+ss/
+*.png
+!docs/*.png
+
+# Logs
+*.log
+logs/

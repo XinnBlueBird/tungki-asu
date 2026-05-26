@@ -1,0 +1,17 @@
+[Unit]
+Description=TungkiAsu submission worker
+After=network.target tungki-asu-bot.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/projects/tungki-asu
+Environment="PATH=/root/projects/tungki-asu/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/root/projects/tungki-asu/venv/bin/python -u /root/projects/tungki-asu/worker.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/tungki-asu-worker.log
+StandardError=append:/var/log/tungki-asu-worker.log
+
+[Install]
+WantedBy=multi-user.target

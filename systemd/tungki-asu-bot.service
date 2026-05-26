@@ -1,0 +1,17 @@
+[Unit]
+Description=TungkiAsu Telegram bot (owner-facing)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/projects/tungki-asu
+Environment="PATH=/root/projects/tungki-asu/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+ExecStart=/root/projects/tungki-asu/venv/bin/python -u /root/projects/tungki-asu/bot.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/tungki-asu-bot.log
+StandardError=append:/var/log/tungki-asu-bot.log
+
+[Install]
+WantedBy=multi-user.target
